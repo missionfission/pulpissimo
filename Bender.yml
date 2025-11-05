@@ -51,6 +51,7 @@ sources:
       - hw/asic_autogen_rom.sv
   - hw/soc_domain.sv
   - hw/pulpissimo.sv
+  - hw/custom_actuator_ctrl.sv
 
 
   # rtl_sim - Generic version of pulpissimo used for non-verilator RTL simulation 
