@@ -54,3 +54,4 @@ The build is very close to completion. The remaining errors are minor and can be
 
 **Recommendation**: Use instruction-level analysis (`analyze_cycles.py`) for immediate results, continue fixing Verilator build for full RTL simulation.
 
+

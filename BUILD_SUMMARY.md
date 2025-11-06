@@ -76,3 +76,4 @@ To get actual cycle counts, run in RTL simulation and extract performance counte
 **Quality**: Production-grade build system
 **Documentation**: Complete analysis and results
 
+

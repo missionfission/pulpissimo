@@ -198,3 +198,4 @@ The custom actuator IP demonstrates significant advantages:
 *Generated on: November 6, 2025*
 *Contact: For questions, please reach out to the PULPissimo integration team*
 
+

@@ -52,3 +52,4 @@ The toolchain can be:
 - Downloaded from: https://github.com/pulp-platform/riscv-gnu-toolchain
 - Or use a standard RISC-V toolchain with PULP extensions
 
+

@@ -70,3 +70,4 @@ The toolchain installed is `riscv64-elf-gcc` (64-bit) symlinked as `riscv32-unkn
 For full PULP extensions support, you may need to build the PULP-specific toolchain from source,
 but the current toolchain should work for basic benchmarks.
 
+

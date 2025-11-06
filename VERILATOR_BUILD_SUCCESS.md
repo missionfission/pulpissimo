@@ -54,3 +54,4 @@ Verilator simulation completed successfully.
 
 The Verilator build is **100% complete** and ready for benchmark execution!
 
+

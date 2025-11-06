@@ -108,3 +108,4 @@ The Verilator testbench infrastructure is **complete and functional**. The syste
 
 The foundation is solid for full RTL benchmark execution once memory loading is implemented.
 
+

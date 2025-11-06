@@ -105,3 +105,4 @@ Custom IP:          141.5 cycles  |  532 bytes  |  1.4 μs latency
 
 **Confidential - Proprietary IP Evaluation**
 
+

@@ -127,3 +127,4 @@ This will:
 
 **Note:** These are instruction-level estimates. Full RTL simulation will provide cycle-accurate measurements. Estimates are conservative.
 
+

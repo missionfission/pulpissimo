@@ -102,3 +102,4 @@ Current instruction-level analysis provides excellent estimates, but full RTL si
 
 The custom IP integration demonstrates clear performance benefits for motor control applications, with significant reductions in instruction count, memory access, and computational overhead.
 
+

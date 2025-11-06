@@ -74,3 +74,4 @@ This provides cycle estimates without full RTL simulation.
 
 **Status**: Verilator build is 95% complete. Remaining issues are vendor-specific modules that need stubs or flags.
 
+

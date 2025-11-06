@@ -76,3 +76,4 @@ if __name__ == '__main__':
     cmd = generate_verilator_command(defines, include_dirs, source_files)
     print(f"\n# Verilator command:\n{cmd}")
 
+

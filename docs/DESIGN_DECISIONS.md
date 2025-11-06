@@ -245,3 +245,4 @@ This document justifies the RTL modifications and design decisions for the enhan
 
 The enhanced custom IP design balances performance, safety, and flexibility to enable high-performance motor control and control-by-wire applications on PULPissimo. Hardware acceleration is essential for meeting real-time requirements, while integration with existing PULP features maximizes overall system performance.
 
+

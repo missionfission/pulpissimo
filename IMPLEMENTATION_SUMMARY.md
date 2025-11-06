@@ -158,3 +158,4 @@ The benchmark infrastructure is in place. The next steps are:
 
 The framework supports comparing software-only vs hardware-accelerated implementations across multiple compiler optimization levels, measuring cycles per operation and latency as requested.
 
+

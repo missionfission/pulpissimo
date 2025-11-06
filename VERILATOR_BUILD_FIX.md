@@ -89,3 +89,4 @@ This provides cycle estimates without requiring full RTL simulation.
 **Status**: Verilator build system fixed and ready for testing
 **Next**: Run `make build` to test full Verilator compilation
 
+

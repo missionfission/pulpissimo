@@ -93,3 +93,4 @@ grep -c "^[0-9a-f]" custom_ip_O2.objdump
 
 The benchmark infrastructure is complete. To get actual cycle measurements, run the benchmarks in simulation (Verilator or Questasim).
 
+

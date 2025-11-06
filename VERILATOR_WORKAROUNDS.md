@@ -52,3 +52,4 @@ This will give you **actual RTL cycle counts** immediately.
 
 **For Verilator:** The workarounds above are possible but Questasim is faster and more reliable.
 
+

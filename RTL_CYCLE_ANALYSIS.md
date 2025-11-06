@@ -173,3 +173,4 @@ The custom actuator IP demonstrates **significant performance improvements**:
 *Analysis performed using instruction-level disassembly of compiled RISC-V binaries*  
 *For precise cycle-accurate measurements, full RTL simulation recommended*
 
+
