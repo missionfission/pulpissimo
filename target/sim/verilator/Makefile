@@ -37,7 +37,7 @@ ifndef EXECUTABLE_PATH
 endif
 	@echo "Running Verilator simulation..."
 	@echo "Note: Verilator support is experimental. Full integration may require additional work."
-	cd $(VERILATOR_BUILD_DIR) && ./Vpulpissimo $(VERILATOR_USER_PLUSARGS)
+	cd $(VERILATOR_BUILD_DIR) && ./obj_dir/Vpulpissimo $(VERILATOR_USER_PLUSARGS)
 
 ## (Re)Compile PULPissimo using Verilator.
 ## @param VERILATOR_BIN=verilator The command to invoke verilator. Default: 'verilator'
@@ -60,6 +60,8 @@ build: $(VERILATOR_BUILD_DIR)/compile_verilator.sh relink
 			--Mdir obj_dir \
 			-Wno-fatal \
 			-Wno-BLKANDNBLK \
+			-Wno-UNOPTFLAT \
+			$(PULPISSIMO_ROOT)/target/sim/verilator/tb_main.cpp \
 			$$DEFINES $$INCDIRS $$VERILATOR_SOURCES \
 			$(VERILATOR_USER_ARGS) || \
 		(echo "Verilator build failed. This is experimental support." && exit 1)
