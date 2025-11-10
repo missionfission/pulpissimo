@@ -61,6 +61,8 @@ build: $(VERILATOR_BUILD_DIR)/compile_verilator.sh relink
 			-Wno-fatal \
 			-Wno-BLKANDNBLK \
 			-Wno-UNOPTFLAT \
+			--public-flat-rw \
+			+define+USE_DEBUG_BUS_DRIVER \
 			$(PULPISSIMO_ROOT)/target/sim/verilator/tb_main.cpp \
 			$$DEFINES $$INCDIRS $$VERILATOR_SOURCES \
 			$(VERILATOR_USER_ARGS) || \

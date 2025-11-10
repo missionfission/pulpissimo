@@ -110,14 +110,22 @@ private:
     uint64_t cycle_;
 };
 
-// Memory accessor using debug bus
+// Memory accessor using debug bus OR direct memory access
 class MemoryAccessor {
 public:
     MemoryAccessor(Vpulpissimo* top) : top_(top), debug_bus_(nullptr) {
-        // Access debug bus through Verilator model's internal structure
-        // The debug bus is exposed as __PVT__pulpissimo__DOT__i_soc_domain__DOT__i_pulp_soc__DOT__s_lint_debug_bus
-        // We can access it directly through the top module
+        // Try to access debug bus through Verilator model's internal structure
+        // With --public-flat-rw flag, Verilator exposes internal signals
         debug_bus_ = top->__PVT__pulpissimo__DOT__i_soc_domain__DOT__i_pulp_soc__DOT__s_lint_debug_bus;
+        
+        if (debug_bus_ == nullptr) {
+            std::cerr << "Warning: Debug bus pointer is null." << std::endl;
+            std::cerr << "  Verilator needs --public-flat-rw flag to expose internal signals." << std::endl;
+            std::cerr << "  Memory loading through debug bus will not work." << std::endl;
+            std::cerr << "  Alternative: Use JTAG boot mode or direct memory initialization." << std::endl;
+        } else {
+            std::cout << "Debug bus accessible - memory loading enabled" << std::endl;
+        }
     }
     
     // Store memory writes
@@ -125,20 +133,41 @@ public:
         writes_[addr] = data;
     }
     
-    // Load memory through debug bus
+    // Load memory through debug bus with improved initialization
+    // NOTE: Debug bus is clocked by SoC clock (interconnect clock), not reference clock
+    // The SoC clock is generated from reference clock via FLL, so we need to wait
+    // for the system to stabilize before accessing the debug bus
     bool load_memory(ClockGen& clk_gen, uint64_t& time_ps, const uint64_t REF_CLK_PERIOD_PS) {
         if (writes_.empty() || !debug_bus_) {
             return false;
         }
         
         std::cout << "Loading " << writes_.size() << " bytes into memory via debug bus..." << std::endl;
+        std::cout << "  NOTE: Debug bus uses SoC clock domain (not reference clock)" << std::endl;
+        
+        // Initialize debug bus - ensure it's in a known state
+        debug_bus_->req = 0;
+        debug_bus_->wen = 1; // Default to read
+        debug_bus_->be = 0xF;
+        debug_bus_->add = 0;
+        debug_bus_->wdata = 0;
+        
+        // Wait for debug bus to be ready - need many reference clock cycles
+        // because SoC clock is much faster than reference clock
+        // SoC clock is typically 50-100 MHz, reference is 32 kHz
+        // So 1 reference clock cycle = ~1500-3000 SoC clock cycles
+        std::cout << "  Waiting for SoC clock domain to stabilize..." << std::endl;
+        for (int i = 0; i < 100; i++) {
+            bool clk = clk_gen.tick();
+            time_ps += REF_CLK_PERIOD_PS / 2;
+            top_->eval();
+        }
         
         // Group writes by 32-bit word addresses
         std::map<uint32_t, uint32_t> word_writes;
         for (const auto& w : writes_) {
             uint32_t word_addr = w.first & ~0x3; // Align to word boundary
             uint32_t byte_offset = w.first & 0x3;
-            uint32_t byte_mask = 0xFF << (byte_offset * 8);
             
             if (word_writes.find(word_addr) == word_writes.end()) {
                 word_writes[word_addr] = 0;
@@ -146,14 +175,23 @@ public:
             word_writes[word_addr] |= (w.second << (byte_offset * 8));
         }
         
-        std::cout << "Writing " << word_writes.size() << " words..." << std::endl;
+        std::cout << "Writing " << word_writes.size() << " words to L2 memory..." << std::endl;
         
         uint32_t words_written = 0;
+        uint32_t words_failed = 0;
+        
         for (const auto& w : word_writes) {
             uint32_t addr = w.first;
             uint32_t data = w.second;
             
-            // Write through debug bus
+            // Ensure we're writing to L2 memory range
+            if (addr < L2_START_ADDR || addr >= L2_END_ADDR) {
+                std::cerr << "Warning: Address 0x" << std::hex << addr 
+                          << " is outside L2 memory range, skipping" << std::dec << std::endl;
+                words_failed++;
+                continue;
+            }
+            
             // Set up write transaction
             debug_bus_->req = 1;
             debug_bus_->wen = 0; // 0 = write
@@ -161,49 +199,72 @@ public:
             debug_bus_->wdata = data;
             debug_bus_->be = 0xF; // All bytes enabled
             
-            // Clock until grant (increased timeout for initialization)
+            // Clock until grant - try longer timeout
             int wait_cycles = 0;
-            while (wait_cycles < 1000 && !debug_bus_->gnt) {  // Increased from 100 to 1000
+            const int MAX_WAIT_CYCLES = 5000; // Increased significantly
+            bool got_grant = false;
+            
+            while (wait_cycles < MAX_WAIT_CYCLES && !debug_bus_->gnt) {
                 bool clk = clk_gen.tick();
                 time_ps += REF_CLK_PERIOD_PS / 2;
                 top_->eval();
                 if (!clk) wait_cycles++;
             }
             
-            if (!debug_bus_->gnt) {
-                std::cerr << "Warning: Timeout waiting for grant at address 0x" 
-                          << std::hex << addr << std::dec << std::endl;
-                debug_bus_->req = 0;
-                continue;
-            }
-            
-            // Wait for valid response
-            wait_cycles = 0;
-            while (wait_cycles < 100 && !debug_bus_->r_valid) {
-                bool clk = clk_gen.tick();
-                time_ps += REF_CLK_PERIOD_PS / 2;
-                top_->eval();
-                if (!clk) wait_cycles++;
+            if (debug_bus_->gnt) {
+                got_grant = true;
+                
+                // Wait for valid response
+                wait_cycles = 0;
+                while (wait_cycles < 200 && !debug_bus_->r_valid) {
+                    bool clk = clk_gen.tick();
+                    time_ps += REF_CLK_PERIOD_PS / 2;
+                    top_->eval();
+                    if (!clk) wait_cycles++;
+                }
+                
+                if (debug_bus_->r_valid) {
+                    words_written++;
+                } else {
+                    words_failed++;
+                    std::cerr << "Warning: No valid response for address 0x" 
+                              << std::hex << addr << std::dec << std::endl;
+                }
+            } else {
+                words_failed++;
+                if (words_failed <= 5) { // Only show first few failures
+                    std::cerr << "Warning: Timeout waiting for grant at address 0x" 
+                              << std::hex << addr << std::dec << " (waited " 
+                              << MAX_WAIT_CYCLES << " cycles)" << std::endl;
+                }
             }
             
             // Clear request
             debug_bus_->req = 0;
             debug_bus_->wen = 1; // Default to read
             
-            // Clock a few more cycles
-            for (int i = 0; i < 2; i++) {
+            // Clock a few more cycles between transactions
+            for (int i = 0; i < 3; i++) {
                 bool clk = clk_gen.tick();
                 time_ps += REF_CLK_PERIOD_PS / 2;
                 top_->eval();
             }
             
-            words_written++;
-            if (words_written % 100 == 0) {
-                std::cout << "  Written " << words_written << " / " << word_writes.size() << " words" << std::endl;
+            if (words_written % 50 == 0 && words_written > 0) {
+                std::cout << "  Written " << words_written << " / " << word_writes.size() 
+                          << " words (failed: " << words_failed << ")" << std::endl;
             }
         }
         
-        std::cout << "Memory loading complete: " << words_written << " words written" << std::endl;
+        std::cout << "Memory loading complete: " << words_written << " words written, " 
+                  << words_failed << " failed" << std::endl;
+        
+        if (words_written == 0) {
+            std::cerr << "ERROR: No words were successfully written!" << std::endl;
+            std::cerr << "  Debug bus may not be initialized or accessible." << std::endl;
+            std::cerr << "  Try: Increase initialization wait time or check debug bus path." << std::endl;
+        }
+        
         return words_written > 0;
     }
     
@@ -355,18 +416,31 @@ int main(int argc, char** argv) {
     MemoryAccessor mem(top);
     
     // Store memory writes from SREC
+    // IMPORTANT: Remap ROM addresses (0x1a000000) to L2 addresses (0x1c000000)
+    // The SREC file contains ROM addresses, but code should be loaded into L2
+    const uint32_t ROM_BASE = 0x1A000000;
+    const uint32_t L2_BASE = 0x1C000000;
+    const uint32_t ADDR_REMAP_OFFSET = L2_BASE - ROM_BASE; // 0x02000000
+    
     if (!records.empty()) {
         std::cout << std::endl << "Preparing memory loading..." << std::endl;
         uint32_t total_bytes = 0;
         for (const auto& rec : records) {
             if (rec.type == SREC_DATA_32BIT) {
+                // Remap ROM addresses to L2 addresses
+                uint32_t l2_addr = rec.address;
+                if (l2_addr >= ROM_BASE && l2_addr < ROM_BASE + 0x2000) {
+                    l2_addr = rec.address + ADDR_REMAP_OFFSET;
+                }
+                
                 for (size_t i = 0; i < rec.data.size(); i++) {
-                    mem.write_memory(rec.address + i, rec.data[i]);
+                    mem.write_memory(l2_addr + i, rec.data[i]);
                     total_bytes++;
                 }
             }
         }
-        std::cout << "Prepared " << total_bytes << " bytes for loading" << std::endl;
+        std::cout << "Prepared " << total_bytes << " bytes for loading (remapped to L2: 0x" 
+                  << std::hex << L2_BASE << std::dec << ")" << std::endl;
     }
     
     // Clock generator
@@ -407,23 +481,40 @@ int main(int argc, char** argv) {
     if (mem.get_write_count() > 0) {
         std::cout << "Attempting memory load through debug bus..." << std::endl;
         
-        // WORKAROUND: Wait longer for system initialization
-        // The debug bus might need more cycles to initialize
-        std::cout << "Waiting for system initialization (1000 cycles)..." << std::endl;
-        for (int i = 0; i < 1000; i++) {
+        // Wait longer for system initialization - debug bus needs time to stabilize
+        // The interconnect and debug module need to be fully initialized
+        // IMPORTANT: Debug bus uses SoC clock (generated from ref clock via FLL)
+        // We need many reference clock cycles to ensure SoC clock domain is stable
+        std::cout << "Waiting for system initialization (10000 ref clock cycles)..." << std::endl;
+        std::cout << "  This allows SoC clock domain (FLL) to stabilize..." << std::endl;
+        for (int i = 0; i < 10000; i++) {
             bool clk = clk_gen.tick();
             time_ps += REF_CLK_PERIOD_PS / 2;
             top->eval();
+            
+            if (i % 2000 == 0 && i > 0) {
+                std::cout << "  Initialized " << i << " ref clock cycles..." << std::endl;
+            }
         }
+        std::cout << "System initialization complete. Starting memory load..." << std::endl;
         
         bool loaded = mem.load_memory(clk_gen, time_ps, REF_CLK_PERIOD_PS);
         if (loaded) {
             std::cout << "Memory loaded successfully. Code execution enabled." << std::endl;
+            // Update entry point to L2 memory
+            if (entry_point >= ROM_START_ADDR && entry_point < ROM_END_ADDR) {
+                entry_point = entry_point + (L2_START_ADDR - ROM_START_ADDR);
+                std::cout << "Entry point remapped to L2: 0x" << std::hex << entry_point << std::dec << std::endl;
+            }
         } else {
-            std::cout << "Warning: Memory loading failed - debug bus not responding" << std::endl;
-            std::cout << "         This is expected - Verilator doesn't support SystemVerilog 'force'" << std::endl;
-            std::cout << "         Use Questasim for full RTL simulation with memory loading" << std::endl;
-            std::cout << "         Current instruction-level estimates: 210.5 (baseline) / 141.5 (custom IP) cycles" << std::endl;
+            std::cout << "ERROR: Memory loading failed - debug bus not responding" << std::endl;
+            std::cout << "  Possible causes:" << std::endl;
+            std::cout << "    1. Debug bus needs JTAG initialization" << std::endl;
+            std::cout << "    2. Debug module needs to be activated" << std::endl;
+            std::cout << "    3. System needs more initialization cycles" << std::endl;
+            std::cout << "    4. Debug bus path may be incorrect" << std::endl;
+            std::cout << std::endl;
+            std::cout << "  Simulation will continue but code may not execute correctly." << std::endl;
         }
     }
     
@@ -515,3 +606,4 @@ int main(int argc, char** argv) {
     
     return 0;
 }
+

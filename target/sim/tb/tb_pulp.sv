@@ -839,40 +839,99 @@ module tb_pulp;
     $fclose(stim_fd);
   endtask  // load_stim
 
+  // Debug bus driver signals (alternative to force statements)
+  logic debug_bus_req;
+  logic [31:0] debug_bus_add;
+  logic debug_bus_wen;
+  logic [31:0] debug_bus_wdata;
+  logic [3:0] debug_bus_be;
+  logic debug_bus_gnt;
+  logic [31:0] debug_bus_rdata;
+  logic debug_bus_r_valid;
+
+  // Connect debug bus driver to actual debug bus (when not using force)
+  // This allows Verilator-compatible access
+  `ifdef USE_DEBUG_BUS_DRIVER
+    // Use direct assignment instead of force
+    assign i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.req = debug_bus_req;
+    assign i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add = debug_bus_add;
+    assign i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wen = debug_bus_wen;
+    assign i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata = debug_bus_wdata;
+    assign i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.be = debug_bus_be;
+    assign debug_bus_gnt = i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.gnt;
+    assign debug_bus_rdata = i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.r_rdata;
+    assign debug_bus_r_valid = i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.r_valid;
+  `endif
+
   task automatic preload_l2(input int num_stim, ref logic [95:0] stimuli[$]);
     logic more_stim;
     static logic [95:0] stim_entry;
     more_stim = 1'b1;
     $display("[TB] %t: Preloading L2 with stimuli through direct access.", $realtime);
-    while (more_stim == 1'b1) begin
-      @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
-      stim_entry = stimuli[num_stim];
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.req = 1'b1;
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add = stim_entry[95:64];
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata = stim_entry[31:0];
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wen = 1'b0;
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.be = '1;
-      do begin
+    
+    `ifdef USE_DEBUG_BUS_DRIVER
+      // Use direct assignment (Verilator-compatible)
+      while (more_stim == 1'b1) begin
         @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
-      end while (~i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.gnt);
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add   = stim_entry[95:64]+4;
-      force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata = stim_entry[63:32];
-      do begin
-        @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
-      end while (~i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.gnt);
-
-      num_stim = num_stim + 1;
-      if (num_stim > $size(stimuli) || stimuli[num_stim] === 96'bx) begin  // make sure we have more stimuli
-        more_stim = 0;  // if not set variable to 0, will prevent additional stimuli to be applied
-        break;
+        stim_entry = stimuli[num_stim];
+        
+        // Write first word
+        debug_bus_req = 1'b1;
+        debug_bus_add = stim_entry[95:64];
+        debug_bus_wdata = stim_entry[31:0];
+        debug_bus_wen = 1'b0;
+        debug_bus_be = '1;
+        do begin
+          @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+        end while (~debug_bus_gnt);
+        
+        // Write second word
+        debug_bus_add = stim_entry[95:64] + 32'h4;
+        debug_bus_wdata = stim_entry[63:32];
+        do begin
+          @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+        end while (~debug_bus_gnt);
+        
+        num_stim = num_stim + 1;
+        if (num_stim > $size(stimuli) || stimuli[num_stim] === 96'bx) begin
+          more_stim = 0;
+          break;
+        end
       end
-    end  // while (more_stim == 1'b1)
-    release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.req;
-    release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add;
-    release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata;
-    release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wen;
-    release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.be;
-    @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+      debug_bus_req = 1'b0;
+      @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+    `else
+      // Original implementation using force (Questasim-only)
+      while (more_stim == 1'b1) begin
+        @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+        stim_entry = stimuli[num_stim];
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.req = 1'b1;
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add = stim_entry[95:64];
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata = stim_entry[31:0];
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wen = 1'b0;
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.be = '1;
+        do begin
+          @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+        end while (~i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.gnt);
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add   = stim_entry[95:64]+4;
+        force i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata = stim_entry[63:32];
+        do begin
+          @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+        end while (~i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.gnt);
+
+        num_stim = num_stim + 1;
+        if (num_stim > $size(stimuli) || stimuli[num_stim] === 96'bx) begin  // make sure we have more stimuli
+          more_stim = 0;  // if not set variable to 0, will prevent additional stimuli to be applied
+          break;
+        end
+      end  // while (more_stim == 1'b1)
+      release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.req;
+      release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.add;
+      release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wdata;
+      release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.wen;
+      release i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.tcdm_debug.be;
+      @(posedge i_dut.i_soc_domain.i_pulp_soc.i_soc_interconnect_wrap.clk_i);
+    `endif
   endtask
 
 
