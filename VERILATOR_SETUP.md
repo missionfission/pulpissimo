@@ -108,3 +108,4 @@ For full Verilator support:
 4. ⚠️ Test memory loading functionality
 5. ⚠️ Extract cycle counts from simulation
 
+

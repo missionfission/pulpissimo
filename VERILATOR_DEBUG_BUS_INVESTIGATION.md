@@ -87,3 +87,4 @@ Until memory loading works, we have:
 2. Implement Option 1 (JTAG) for full solution
 3. Document findings for customer presentation
 
+
